@@ -5,89 +5,69 @@ description: Check web pages for WCAG 2.2 AA accessibility violations and FIX th
 
 # a11y-audit
 
-Scan a live page for WCAG 2.2 AA violations, then fix them in the source.
+Scan a real page for WCAG 2.2 AA violations, then fix them in the source.
 
 The value is not the finding — **axe-core already finds these.** The value is the
-fix: every violation below carries the concrete edit, not the rule name.
+fix: every rule below carries the concrete edit, not the rule name.
+
+## Setup (once per project)
+
+```bash
+npm install axe-core
+```
+
+That is the only dependency. The scanner is one file, `scan.mjs`, sitting next
+to this skill.
 
 ## Scan
 
-**The public API allows 5 scans per day per IP, resetting at 00:00 UTC.** This is
-the hard limit that shapes everything below. If you get HTTP 429 with
-`retryAfterSeconds`, you are not being throttled temporarily — you are out for
-the day. Do not retry in a loop; switch to the local path.
-
-Two options, in order of preference:
-
-### Option A — scan the deployed site (default)
-
 ```bash
-# 1. Start a scan (returns id, status QUEUED)
-curl -s -X POST https://a11ymonitor-api.onrender.com/api/v1/scans \
-  -H 'Content-Type: application/json' -d '{"url":"https://TARGET"}'
-
-# 2. Poll until status is terminal (cold start ~30s, full scan 30-120s)
-curl -s https://a11ymonitor-api.onrender.com/api/v1/scans/SCAN_ID
+node scan.mjs <url>              # human-readable report
+node scan.mjs <url> --json       # machine-readable
 ```
 
-Poll every 5s, up to 180s. A scan of a cold instance takes **~55s**; a warm one
-is faster. Do not report failure before 180s.
+Useful flags:
 
-### Option B — run axe-core yourself (when the public limit is spent, or for local work)
-
-The public API refuses `localhost` by design, so local projects need this path.
-The rule IDs and severities are **identical** to the API — the fix table below
-applies unchanged. Only the response shape differs.
-
-```bash
-npx @axe-core/cli http://localhost:3000            # human-readable
-npx @axe-core/cli http://localhost:3000 -s a11y.json  # save JSON
-```
-
-Real flags, verified: `-s [file]` saves JSON, `-j` pipes to stdout, `-q` exits
-non-zero on violations. **There is no `--json` flag** — it errors with
-`unknown option '--json'`.
-
-Requires Chrome plus a matching `chromedriver`. If you get a WebDriver error on
-a server or container, `--chrome-path` and `--chromedriver-path` usually fix it.
-
-
-### Statuses — there are seven, and three are failures
-
-| status | meaning | what to do |
+| flag | default | what it does |
 |---|---|---|
-| `QUEUED` / `RUNNING` | still working | keep polling |
-| `DONE` | success | report the score |
-| `PARTIAL` | some pages loaded | report with a caveat — the score covers less than the whole site |
-| `FAILED_SITE_DOWN` | the target would not load | the site blocked the headless browser or is down. Retry once; if it fails again, say the site refused the scan. **Not** a bug in your markup. |
-| `FAILED_TIMEOUT` | scan exceeded its limit | the page is too heavy. Scan a lighter page, or fewer pages. |
-| `FAILED_ROBOTS` | blocked by robots.txt | ask the user for permission or use a different URL. |
+| `--json` | off | JSON to stdout, for parsing |
+| `--wait <ms>` | 1200 | extra settle time before auditing — raise for slow SPAs |
+| `--timeout <ms>` | 90000 | hard limit; the scanner exits non-zero if hit |
+| `--browser <path>` | auto | override browser detection |
 
-**These are not `FAILED`.** Polling on `DONE`/`FAILED` alone will hang forever on
-`FAILED_SITE_DOWN` — match on anything terminal, not on a literal `FAILED`.
+The scanner finds a browser automatically: a Playwright cache
+(`~/.cache/ms-playwright`), or a system Chrome/Chromium. It needs no driver, no
+server, and no network. It works on `localhost`, on private IPs, and offline.
 
-## What the response gives you
+**Exit codes:** `0` scanned, `1` error (no browser, empty page, timeout),
+`2` bad arguments. A non-zero code means no audit happened — say so rather than
+reporting findings.
 
-```json
-{
-  "status": "DONE", "score": 92, "issuesTotal": 2, "pagesScanned": 1,
-  "issues": [{
-    "ruleId": "landmark-one-main",
-    "ruleHelp": "Document should have one main landmark",
-    "helpUrl": "https://dequeuniversity.com/rules/axe/4.10/landmark-one-main",
-    "wcagRef": null,
-    "severity": "MODERATE",
-    "instanceCount": 1,
-    "sampleUrls": ["https://example.com"]
-  }]
-}
+## Reading the output
+
+```
+http://127.0.0.1:8899/bad.html
+7 violations — 2 critical, 3 serious, 2 moderate, 0 minor
+axe-core 4.13.0 · 26 rules passed
+
+[CRITICAL] button-name — Buttons must have discernible text
+  https://dequeuniversity.com/rules/axe/4.13/button-name?application=axeAPI
+  1 instance
+  target: button
+  html:   <button></button>
+  why:    Element does not have inner text that is visible to screen readers
 ```
 
-`score` is 0–100. `severity` is one of `CRITICAL` / `SERIOUS` / `MODERATE` / `MINOR`.
+`target` is the CSS selector — use it to find the element in the source.
+`html` is the offending snippet. `why` is axe-core's message.
+
+In JSON mode each violation has `id`, `impact` (`critical` / `serious` /
+`moderate` / `minor`), `help`, `helpUrl`, and `nodes[]` with `target`, `html`,
+and the message.
 
 ## The fix table
 
-This is the part that matters. Match `ruleId` and apply the edit.
+This is the part that matters. Match the rule `id` and apply the edit.
 
 ### Landmarks and structure
 
@@ -160,40 +140,46 @@ This is the part that matters. Match `ruleId` and apply the edit.
 
 ## Reporting
 
-Lead with the number that matters: score, then `CRITICAL`/`SERIOUS` count.
-Group fixes by file, since that is how the user will act on them.
+Lead with the number that matters: counts by severity, then fixes grouped by
+file, since that is how the user will act on them.
 
 ```
-A11y audit — https://example.com
-Score 92/100 · 2 issues (0 critical, 0 serious, 2 moderate)
+A11y audit — http://localhost:3000
+7 violations: 2 critical, 3 serious, 2 moderate
 
-frontend/app/page.tsx
-  1. landmark-one-main — no <main> element (1 instance)
-     Fix: wrap the page content in <main id="main">
-  2. region — content outside any landmark (1 instance)
-     Fix: the footer <div> is outside a landmark — make it <footer>
+src/components/Modal.tsx
+  1. aria-dialog-name — dialog has no accessible name (1 instance)
+     target: div[role="dialog"]
+     Fix: add aria-labelledby pointing at the modal title
+  2. button-name — empty icon button (1 instance)
+     target: button.close
+     Fix: add aria-label="Close"
+
+src/app/page.tsx
+  3. image-alt — <img src="x.png"> has no alt (1 instance)
+     Fix: descriptive alt, or alt="" if decorative
 ```
 
 Then apply the fixes yourself. Do not stop at the report if the user asked for a
-fix, and do not claim a fix works until you re-scan and the score moved.
+fix, and **do not claim a fix works until you re-scan and the violation count
+actually dropped.** Re-run `scan.mjs` and compare.
 
 ## Limits — know these before you promise anything
 
-- **The scan is not the audit.** axe-core catches roughly a third of WCAG
-  issues. Keyboard traps, focus order, meaningful sequence, and alt-text
-  *quality* need a human. Never tell the user a page is "accessible" — say
-  what was checked.
-- **Only public URLs.** The API refuses private IPs and localhost (SSRF guard,
-  HTTP 400 `invalid_url`). `localhost:3000` cannot be scanned. For local work,
-  scan a deployed preview instead.
-- **JavaScript must render first.** The scanner loads the page in Chromium and
-  waits; content that appears only after a long interaction may be missed.
-- **`wcagRef` is often `null`.** Fall back to the rule name and `helpUrl`.
-- **Free tier, shared instance.** The public API is rate-limited and sleeps when
-  idle. One person's scan can be slowed by another's.
+- **A scan is not an audit.** axe-core catches roughly a third of WCAG issues.
+  Keyboard traps, focus order, meaningful sequence, and alt-text *quality* need
+  a human. Never tell the user a page is "accessible" — say what was checked.
+- **Client-rendered content may be missed.** The default wait is 1.2s. For a
+  slow SPA raise it: `--wait 4000`. Content behind a click or a login is not
+  scanned at all.
+- **Single page only.** It audits the URL you give. It does not crawl.
+- **Affects only what axe can measure** — roughly 30–40% of WCAG AA.
+- **Broken sites return an error, not findings.** If the scanner exits non-zero
+  or prints `error:`, the audit did not happen. Report that, not a clean bill
+  of health.
 
-## When there is no public URL
+## When the page is behind a login
 
-If the user is working locally and has no deployed preview, do not fake a scan.
-Instead, read the markup directly and apply the same fix table statically —
-say plainly that you reviewed the source rather than a live scan.
+Do not fake it and do not ask the user to paste their session cookie. Say that
+the scan needs an unauthenticated URL, or audit the component in isolation with
+a static fixture the user can open.

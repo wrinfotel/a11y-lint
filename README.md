@@ -3,12 +3,12 @@
 **WCAG 2.2 rules your coding agent can act on.**
 
 A skill for Claude Code, Codex, ZCode, Cursor and any Skills-compatible agent.
-Point it at a page, it finds the violations and **edits your source to fix them** —
-not just a report you have to act on yourself.
+Point it at a page, it finds the violations and **edits your source to fix them**
+— not just a report you have to act on yourself.
 
 ```text
 Read https://github.com/wrinfotel/a11y-lint/blob/main/skills/a11y-audit/SKILL.md
-and audit the accessibility of https://myapp.com, then fix what you find.
+and audit the accessibility of http://localhost:3000, then fix what you find.
 ```
 
 ## The problem with accessibility scanners
@@ -33,68 +33,66 @@ Fix: use your --text-muted token on this surface, or drop to --text-secondary.
 Do not hardcode a hex; the pair is defined in app/globals.css.
 ```
 
-Every rule in the fix table carries the edit — the tag to add, the attribute to
-remove, the token to reach for. Around 60 rules across landmarks, images, forms,
-contrast, focus, dialogs and tables.
+Around 60 rules across landmarks, images, forms, contrast, focus, dialogs and
+tables, each with the concrete edit.
 
 ## Install
-
-Copy into your project:
 
 ```bash
 git clone https://github.com/wrinfotel/a11y-lint.git
 cp -r a11y-lint/skills/a11y-audit .claude/skills/
+cd .claude/skills/a11y-audit && npm install axe-core
 ```
 
-Or drop the single `SKILL.md` anywhere your agent reads skills. It has no
-dependencies — it calls a public API over `curl`.
+One dependency, one file. Then:
+
+```bash
+node scan.mjs http://localhost:3000
+```
 
 ## How it works
 
-Two paths, because the hosted API has a limit that matters.
+`scan.mjs` spawns a headless browser, injects axe-core, and runs the audit
+locally. **No server, no API, no network, no driver.**
 
-**Deployed site** — the scan runs in a real Chromium browser against
-[A11yMonitor](https://a11ymonitor.vercel.app), your own free WCAG 2.2 scanner:
+That last point is the design decision. A hosted scanner is a liability: it
+sleeps when idle, has a request quota, refuses `localhost`, cannot reach your
+private network, and adds a round trip to every check. This runs in ~3 seconds
+against `http://localhost:3000` and gives the same rule IDs and severities.
 
-```bash
-curl -X POST https://a11ymonitor-api.onrender.com/api/v1/scans \
-  -H 'Content-Type: application/json' -d '{"url":"https://TARGET"}'
-```
-
-The skill handles the queue, the polling, and the seven scan statuses (three of
-which are failures that are easy to mistake for success).
-
-**Anything else** — 5 scans per day per IP, and localhost is refused by design.
-So the skill falls back to running axe-core directly, which has neither limit:
+It finds a browser itself — a Playwright cache or a system Chrome — and uses
+Node's built-in WebSocket to talk to it, so there is nothing to configure.
 
 ```bash
-npx @axe-core/cli http://localhost:3000 -s a11y.json
+node scan.mjs <url>                  # report
+node scan.mjs <url> --json           # JSON
+node scan.mjs <url> --wait 4000      # slow SPAs
 ```
 
-Same rule IDs, same severities, same fix table. The limit is the reason the
-second path exists, not a nice-to-have.
-
+Exit codes: `0` scanned, `1` error, `2` bad arguments. A non-zero code means no
+audit happened — the skill says so instead of reporting a clean page.
 
 ## Limits, stated up front
 
 - **A scan is not an audit.** axe-core catches roughly a third of WCAG issues.
   Keyboard traps, focus order, meaningful sequence and alt-text *quality* still
-  need a human. This skill will not tell you a page is "accessible".
-- **Public URLs only.** The scanner refuses localhost and private IPs by design
-  (SSRF guard). For local work, scan a deployed preview.
-- **A shared free instance.** Rate limits apply and it sleeps when idle.
-- **`wcagRef` is often `null`** in the response — the skill falls back to rule
-  names and axe docs.
+  need a human.
+- **Client-rendered content may be missed** at the default 1.2s wait. Raise
+  `--wait` for slow SPAs.
+- **Single page.** It audits the URL you give; it does not crawl.
+- **Nothing behind a login.**
 
-These limits are in the skill file itself, so the agent states them too instead
-of overclaiming.
+These are in the skill file itself, so the agent states them too instead of
+overclaiming.
 
-## Related
+## Credits
 
-- [A11yMonitor](https://github.com/wrinfotel/a11ymonitor) — the scanner
-  (Spring Boot + Playwright + axe-core). Free, no signup.
-- [dequeuniversity.com/rules/axe](https://dequeuniversity.com/rules/axe/4.10) —
-  the rule reference behind every `ruleId`.
+Built on [axe-core](https://github.com/dequelabs/axe-core) by Deque, and the
+rule reference at
+[dequeuniversity.com/rules/axe](https://dequeuniversity.com/rules/axe/4.13).
+
+Related: [A11yMonitor](https://github.com/wrinfotel/a11ymonitor) — a hosted
+WCAG 2.2 scanner for humans, same engine.
 
 ## License
 
