@@ -1,3 +1,4 @@
 node_modules/
 a11y.json
 *.log
+package-lock.json

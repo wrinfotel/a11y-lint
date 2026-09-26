@@ -262,7 +262,10 @@ async function connect() {
       incomplete: result.incomplete?.length ?? 0,
       testEngine: result.testEngine,
     }, null, 2));
-    cleanup(0);
+    // Must actually stop here: cleanup() schedules process.exit on a timer,
+    // so falling through would append the human report after the JSON and
+    // break every parser reading stdout.
+    return cleanup(0);
   }
 
   // Human-readable report

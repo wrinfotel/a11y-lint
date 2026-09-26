@@ -1,0 +1,10 @@
+{
+  "name": "a11y-audit",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Standalone WCAG 2.2 scanner: headless browser + axe-core, no server",
+  "type": "module",
+  "dependencies": {
+    "axe-core": "^4.13.0"
+  }
+}
