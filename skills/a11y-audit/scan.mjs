@@ -95,15 +95,8 @@ function findAxe() {
   try {
     return require.resolve('axe-core');
   } catch {}
-  const cache = join(homedir(), '.npm', '_npx');
-  if (existsSync(cache)) {
-    for (const dir of readdirSync(cache)) {
-      const p = join(cache, dir, 'node_modules', 'axe-core', 'axe.min.js');
-      if (existsSync(p)) return p;
-    }
-  }
-  console.error('error: axe-core not found. Run:  npm install axe-core');
-  console.error('   (it will be vendored into node_modules/ next to this script)');
+  console.error('error: axe-core not found next to this script.');
+  console.error('   Fix:  npm install axe-core');
   process.exit(2);
 }
 
